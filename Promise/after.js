@@ -1,3 +1,4 @@
+// 词法作用域
 function after(time, cb){
     console.log(time);
     return function(){

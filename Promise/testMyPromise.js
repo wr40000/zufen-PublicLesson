@@ -1,12 +1,26 @@
 let Promise = require("./promise.js");
 
 let p = new Promise((resolve, reject) => {
-  resolve();
+  resolve(100);
 });
-let promise2 = p.then((data) => {
-    throw new Error("报错了")
-})
-promise2.then((data) => {
-    console.log(data);
-}, err => console.log(err));
+p.then(
+  (data) => {
+    // return Promise.resolve("Terraria");
+    return new Promise("Terraria");
+    // return "Terraria";
+    // throw new Error("报错了")
+  },
+  (err) => {
+    throw err;
+  }
+);
+console.log("p", p);
+// .then((data) => {
+//     console.log(data);
+//     return data
+// }, err => console.log(err));
 
+// setTimeout(() => {
+//   console.log("p", p);
+// }, 1000);
+p.then().then().then()

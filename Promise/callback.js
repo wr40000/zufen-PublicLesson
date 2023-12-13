@@ -12,7 +12,7 @@ Function.prototype.before = function (cb) {
     console.log("arg: ", arg);
       cb();
       // console.log("this: ", this);
-      this(...arg)
+      // this(...arg)
   }
 };
 let newFn = say.before(function () {
