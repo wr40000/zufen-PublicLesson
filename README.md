@@ -472,3 +472,389 @@ Promise.defer = Promise.deferred = function () {
 ```
 
 promises-aplus-tests中共有872条测试用例。以上代码，可以完美通过所有用例。
+
+
+
+### Promise其他方法
+
+#### Promise.resolve
+
+Promise.resolve(value) 返回一个以给定值解析后的Promise 对象.
+
+1. 如果 value 是个 thenable 对象，返回的promise会“跟随”这个thenable的对象，采用它的最终状态
+2. 如果传入的value本身就是promise对象，那么Promise.resolve将不做任何修改、原封不动地返回这个promise对象。
+3. 其他情况，直接返回以该值为成功状态的promise对象。
+
+```js
+复制代码Promise.resolve = function (param) {
+        if (param instanceof Promise) {
+        return param;
+    }
+    return new Promise((resolve, reject) => {
+        if (param && typeof param === 'object' && typeof param.then === 'function') {
+            setTimeout(() => {
+                param.then(resolve, reject);
+            });
+        } else {
+            resolve(param);
+        }
+    });
+}
+```
+
+thenable对象的执行加 setTimeout的原因是根据原生Promise对象执行的结果推断的，如下的测试代码，原生的执行结果为: 20  400  30;为了同样的执行顺序，增加了setTimeout延时。
+
+#### Promise.finally
+
+不管成功还是失败，都会走到finally中,并且finally之后，还可以继续then。并且会将值原封不动的传递给后面的then.
+
+```js
+复制代码Promise.prototype.finally = function (callback) {
+    return this.then((value) => {
+        return Promise.resolve(callback()).then(() => {
+            return value;
+        });
+    }, (err) => {
+        return Promise.resolve(callback()).then(() => {
+            throw err;
+        });
+    });
+}
+```
+
+#### Promise.all
+
+Promise.all(promises) 返回一个promise对象
+
+1. 如果传入的参数是一个空的可迭代对象，那么此promise对象回调完成(resolve),只有此情况，是同步执行的，其它都是异步返回的。
+2. 如果传入的参数不包含任何 promise，则返回一个异步完成.
+3. promises 中所有的promise都promise都“完成”时或参数中不包含 promise 时回调完成。
+4. 如果参数中有一个promise失败，那么Promise.all返回的promise对象失败
+5. 在任何情况下，Promise.all 返回的 promise 的完成状态的结果都是一个数组
+
+```js
+复制代码Promise.all = function (promises) {
+    promises = Array.from(promises);//将可迭代对象转换为数组
+    return new Promise((resolve, reject) => {
+        let index = 0;
+        let result = [];
+        if (promises.length === 0) {
+            resolve(result);
+        } else {
+            function processValue(i, data) {
+                result[i] = data;
+                if (++index === promises.length) {
+                    resolve(result);
+                }
+            }
+            for (let i = 0; i < promises.length; i++) {
+                  //promises[i] 可能是普通值
+                  Promise.resolve(promises[i]).then((data) => {
+                    processValue(i, data);
+                }, (err) => {
+                    reject(err);
+                    return;
+                });
+            }
+        }
+    });
+}
+```
+
+- 使用计数器来解决多个异步并发的问题
+
+![image-20231212204429560](README.assets/image-20231212204429560.png)
+
+
+
+## 异步嵌套解决方案
+
+```
+参考文献
+作者：一只ice
+链接：https://juejin.cn/post/7144308012952322084
+来源：稀土掘金
+著作权归作者所有。商业转载请联系作者获得授权，非商业转载请注明出处。
+```
+
+
+
+### Promise.defer
+
+将Promise Promise的resolve Promise的reject提升到同一层级
+
+- **返回Promise使用then连续调用的形式**
+
+  - ```js
+    function requestData(url) {
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          if (url.includes('iceweb')) {
+            resolve(url)
+          } else {
+            reject('请求错误')
+          }
+        }, 1000);
+      })
+    }
+    
+    requestData('iceweb.io').then(res => {
+      return requestData(`iceweb.org ${res}`)
+    }).then(res => {
+      return requestData(`iceweb.com ${res}`)
+    }).then(res => {
+      console.log(res)
+    })
+    
+    //iceweb.com iceweb.org iceweb.io
+    ```
+
+### 生成器 + Promise
+
+- 每次调用**generator.next()**，都会**执行到对应的yield然后停止**
+
+- 像let result = yield requestData(url); 因为是先执行右边的，有结果了再赋值给result
+
+所以第一次执行结束还没有完成赋值，也就是此时result为undefined,且每次next(arg),arg将
+
+被作为上一次yield的结果
+
+```js
+function* getData(url) {
+  let result = yield requestData(url);
+  let result2 = yield requestData(result);
+  let result3 = yield requestData(result2);
+  console.log(result3);
+}
+```
+
+```js
+// 打印结果是一个对象：{ value: Promise { <pending> }, done: false }
+// requestData(url)会返回一个promise,作为value的值
+console.log(generator.next()); 
+```
+
+```js
+// 看着也挺抽象的
+generator
+    .next()
+    .value.then((data) =>
+                generator
+                .next(`iceweb.org${data}`)
+                .value.then((data) =>
+                            generator.next(`iceweb.com${data}`).value.then((data) => generator.next(data))
+                           )
+               );
+```
+
+getData已经变为同步的形式，可以拿到最终的结果了。generator虽然一直在调
+
+用.next看起来似乎也产生了回调地狱，其实不用关心这个，因为它这个是有规律的，我们可
+
+以封装成一个自动化执行的函数，内部是如何调用的我们就不用关心了。
+
+### 自动化执行函数封装
+
+```js
+function* getData() {
+  const res1 = yield requestData('iceweb.io')
+  const res2 = yield requestData(`iceweb.org ${res1}`)
+  const res3 = yield requestData(`iceweb.com ${res2}`)
+
+  console.log(res3)
+}
+```
+
+```js
+function asyncAutomation(genFn){
+  let generator = genFn();
+
+  const _automation = (result) => {
+    let nextData = generator.next(result)
+    if(nextData.done) return 
+    nextData.value.then((data)=>{
+      _automation(data)
+    })
+  }
+
+  _automation()
+}
+
+asyncAutomation(getData)
+```
+
+- 利用promise+生成器的方式变相实现解决回调地狱问题，其实就是`async await`的一个变种而已
+- 最早为 **TJ** 实现，**前端大神人物**
+- async await核心代码就类似这些，内部主动帮我们调用`.next`方法
+
+
+
+### async + await
+
+**最终解决方案**
+
+```js
+function requestData(url) {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      if (url.includes('iceweb')) {
+        resolve(url)
+      } else {
+        reject('请求错误')
+      }
+    }, 1000);
+  })
+}
+
+async function getData(url){
+  let result = await requestData(url)
+  let result2 = await requestData(`iceweb.org${result}`)
+  let result3 = await requestData(`iceweb.com${result2}`)
+  console.log(result3);
+}
+
+getData('iceweb.io')
+```
+
+- 哈人，只要把 **自动化执行函数封装** 中的getData生成器函数，改为async函数，yeild的关键
+
+字替换为await就可以实现异步代码同步写法了。
+
+## async/await 剖析
+
+```
+参考文献
+作者：一只ice
+链接：https://juejin.cn/post/7144308012952322084
+来源：稀土掘金
+著作权归作者所有。商业转载请联系作者获得授权，非商业转载请注明出处。
+```
+
+
+
+- async（异步的）
+- async 用于申明一个异步函数
+
+### async内部代码同步执行
+
+- 异步函数的内部代码执行过程和普通的函数是一致的，默认情况下也是会被同步执行
+
+  - ​	
+
+    ```js
+    async function sayHi() {
+      console.log('hi ice')
+    }
+    
+    sayHi()
+    
+    //hi ice
+    ```
+
+### 异步函数的返回值
+
+异步函数的返回值和普通返回值有所区别
+
+- 普通函数主动返回什么就返回什么，不返回为`undefined`
+- 异步函数的返回值特点
+  - 明确有返回一个普通值，相当于`Promise.resolve`(返回值)
+  - 返回一个thenable对象则由，then方法中的`resolve`,或者`reject`有关
+  - 明确返回一个promise，则由这个promise决定
+
+异步函数中可以使用`await`关键字，现在在全局也可以进行`await`，但是不推荐。会阻塞主进程的代码执行
+
+### 异步函数的异常处理
+
+- 如果函数内部中途发生错误，可以通过try catch的方式捕获异常
+- 如果函数内部中途发生错误，也可以通过函数的返回值.catch进行捕获
+
+```js
+async function sayHi() {
+  console.log(res)
+}
+sayHi().catch(e => console.log(e))
+
+//或者
+
+async function sayHi() {
+  try {
+    console.log(res)
+  }catch(e) {
+    console.log(e)
+  }
+}
+
+sayHi()
+
+//ReferenceError: res is not defined
+```
+
+### await 关键字
+
+异步函数中可以使用`await`关键字，普通函数不行
+
+await特点
+
+- 通常await关键字后面都是跟一个Promise
+  - 可以是普通值
+  - 可以是thenable
+  - 可以是Promise主动调用`resolve或者reject`
+- 这个promise状态变为fulfilled才会执行`await`后续的代码，所以`await`后面的代码，相当于包括在`.then`方法的回调中，如果状态变为rejected，你则需要在函数内部`try catch`，或者进行链式调用进行`.catch`操作
+
+```js
+function requestData(url) {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      if (url.includes('iceweb')) {
+        resolve(url)
+      } else {
+        reject('请求错误')
+      }
+    }, 1000);
+  })
+}
+
+async function getData() {
+  const res = await requestData('iceweb.io')
+  console.log(res)
+}
+
+getData()
+
+// iceweb.io
+```
+
+![image-20231213190818377](README.assets/image-20231213190818377.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
