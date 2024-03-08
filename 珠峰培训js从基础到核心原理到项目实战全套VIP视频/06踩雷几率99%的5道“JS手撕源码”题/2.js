@@ -1,4 +1,4 @@
-/* 
+ /* 
  * 两个对合并的意义:
  *   + 插件组件封装：参数处理
  *   + 业务需求
@@ -41,6 +41,8 @@ const params = {
 // 基于浅比较实现的对象的合并
 // let xx = Object.assign(options, params);
 
+// + 校验法则
+// + lodash 源码 深克隆
 /* 
  * 几种情况的分析
  *   A->options中的key值  B->params中的key值
